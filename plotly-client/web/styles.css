@@ -642,6 +642,28 @@ body.light .miniDetails{
   border-bottom:1px solid var(--border2);
 }
 
+.deviceTable th[data-sort]{
+  cursor:pointer;
+  user-select:none;
+}
+.deviceTable th[data-sort]:hover{
+  color:var(--text);
+}
+.deviceTable th[data-sort]::after{
+  content:'';
+  display:inline-block;
+  margin-left:4px;
+  opacity:0;
+}
+.deviceTable th[data-sort].sort-asc::after{
+  content:'\25B2';
+  opacity:1;
+}
+.deviceTable th[data-sort].sort-desc::after{
+  content:'\25BC';
+  opacity:1;
+}
+
 .deviceTable tbody tr:last-child td{
   border-bottom:none;
 }

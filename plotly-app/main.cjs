@@ -88,24 +88,34 @@ async function startBackend() {
       '--no-open'
     ],
     {
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
       windowsHide: true,
       detached: false
     }
   );
 
+  let stderrBuf = '';
+  backendProcess.stderr.setEncoding('utf8');
+  backendProcess.stderr.on('data', (chunk) => { stderrBuf += chunk; });
+
   backendProcess.once('exit', (code, signal) => {
     if (!app.isQuitting) {
-      dialog.showErrorBox(
-        'plotly-client exited',
-        `The backend process stopped unexpectedly (code: ${code}, signal: ${signal}).`
-      );
+      const out = stderrBuf.trim();
+      const detail = out
+        ? `The backend process stopped unexpectedly (code: ${code}, signal: ${signal}).\n\nOutput:\n${out}`
+        : `The backend process stopped unexpectedly (code: ${code}, signal: ${signal}).`;
+      dialog.showErrorBox('plotly-client exited', detail);
       app.quit();
     }
   });
 
   await waitForServer(`http://${HTTP_HOST}:${port}`, STARTUP_TIMEOUT_MS);
-  return port;
+
+  // Give the async UDP listener task a moment to attempt its first bind.
+  await new Promise((r) => setTimeout(r, 300));
+  const udpMatch = stderrBuf.match(/\[UDPU\] Failed to bind UDP socket: (.+)/);
+
+  return { port, udpError: udpMatch ? udpMatch[1].trim() : null };
 }
 
 function stopBackend() {
@@ -117,7 +127,7 @@ function stopBackend() {
 }
 
 async function createMainWindow() {
-  const port = await startBackend();
+  const { port, udpError } = await startBackend();
 
   const dark = nativeTheme.shouldUseDarkColors;
   const win = new BrowserWindow({
@@ -133,7 +143,15 @@ async function createMainWindow() {
     }
   });
 
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => {
+    win.show();
+    if (udpError) {
+      dialog.showErrorBox(
+        'Cannot bind UDP port 8099',
+        `The backend could not listen for device data on UDP port 8099:\n\n${udpError}\n\nMake sure no other application is using port 8099 and restart Kiwi Plotter.`
+      );
+    }
+  });
   await win.loadURL(`http://${HTTP_HOST}:${port}`);
 }
 

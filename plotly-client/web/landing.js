@@ -16,6 +16,8 @@
   const disconnectedView = document.getElementById('disconnectedView');
   const disconnectedSessionsEl = document.getElementById('disconnectedSessions');
   const newSessionBtn = document.getElementById('newSessionBtn');
+  const exportDisconnectBtn = document.getElementById('exportDisconnectBtn');
+  const exportDisconnectXlsxBtn = document.getElementById('exportDisconnectXlsxBtn');
 
   const devices = new Set();
   const tabs = new Map();
@@ -32,6 +34,9 @@
   const archivedSessions = [];
   let sessionCounter = 1;
   let reconnects = 0;
+  // Sorting state for the device table. sortKey: null | 'name' | 'uptime'
+  let sortKey = null;
+  let sortDir = 'asc';
 
   const params = new URLSearchParams(window.location.search);
   const board = params.get('board');
@@ -84,9 +89,27 @@
 
   function filteredPorts() {
     const q = currentFilter();
-    const all = Array.from(devices).sort((a, b) => Number(a) - Number(b));
-    if (!q) return all;
-    return all.filter((p) => String(p).includes(q) || (deviceNames.get(p) || '').toLowerCase().includes(q.toLowerCase()));
+    let all = Array.from(devices);
+    if (q) {
+      all = all.filter((p) => String(p).includes(q) || (deviceNames.get(p) || '').toLowerCase().includes(q.toLowerCase()));
+    }
+    if (sortKey === 'name') {
+      all.sort((a, b) => {
+        const na = (deviceNames.get(a) || a).toLowerCase();
+        const nb = (deviceNames.get(b) || b).toLowerCase();
+        return sortDir === 'asc' ? na.localeCompare(nb) : nb.localeCompare(na);
+      });
+    } else if (sortKey === 'uptime') {
+      all.sort((a, b) => {
+        const ta = connectionTimes.get(a) ?? Date.now();
+        const tb = connectionTimes.get(b) ?? Date.now();
+        // asc = shortest uptime first = largest connectedAt first
+        return sortDir === 'asc' ? tb - ta : ta - tb;
+      });
+    } else {
+      all.sort((a, b) => Number(a) - Number(b));
+    }
+    return all;
   }
 
   function activateTab(key) {
@@ -245,6 +268,12 @@
       tdPkt.textContent = '—';
       tr.appendChild(tdPkt);
 
+      const tdUptime = document.createElement('td');
+      tdUptime.className = 'devStat';
+      tdUptime.dataset.stat = 'uptime';
+      tdUptime.textContent = '—';
+      tr.appendChild(tdUptime);
+
       const td3d = document.createElement('td');
       td3d.className = 'devActions';
       const btn3d = document.createElement('button');
@@ -261,6 +290,12 @@
       tr.appendChild(td3d);
 
       listEl.appendChild(tr);
+    }
+
+    // Reorder existing rows to match the (sorted) ports array.
+    for (const port of ports) {
+      const row = listEl.querySelector(`tr[data-port="${CSS.escape(port)}"]`);
+      if (row) listEl.appendChild(row);
     }
   }
 
@@ -354,6 +389,12 @@
     return new Date(ms).toLocaleTimeString();
   }
 
+  function yyyymmdd_hhmmss(ms) {
+    const d = new Date(ms);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  }
+
   function formatDuration(ms) {
     const totalSec = Math.floor(ms / 1000);
     const days = Math.floor(totalSec / 86400);
@@ -425,6 +466,8 @@
     const hasAny = archivedSessions.length > 0 || disconnectedDevices.length > 0;
     if (disconnectedTab) disconnectedTab.style.display = hasAny ? '' : 'none';
     if (newSessionBtn) newSessionBtn.disabled = disconnectedDevices.length === 0;
+    if (exportDisconnectBtn) exportDisconnectBtn.disabled = !hasAny;
+    if (exportDisconnectXlsxBtn) exportDisconnectXlsxBtn.disabled = !hasAny;
   }
 
   function archiveSession() {
@@ -484,6 +527,23 @@ function fetchDevicesOnce() {
     });
   }
 
+  document.querySelectorAll('#deviceTable thead th[data-sort]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      if (sortKey === key) {
+        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortKey = key;
+        sortDir = 'asc';
+      }
+      document.querySelectorAll('#deviceTable thead th[data-sort]').forEach((el) => {
+        el.classList.remove('sort-asc', 'sort-desc');
+      });
+      th.classList.add(sortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+      render();
+    });
+  });
+
   if (refreshBtn) {
     refreshBtn.addEventListener('click', () => {
       fetchDevicesOnce();
@@ -506,6 +566,69 @@ function fetchDevicesOnce() {
     newSessionBtn.disabled = true;
     newSessionBtn.addEventListener('click', () => {
       archiveSession();
+    });
+  }
+
+  if (exportDisconnectBtn) {
+    exportDisconnectBtn.disabled = true;
+    exportDisconnectBtn.addEventListener('click', () => {
+      // Sessions in chronological order (oldest first, current last).
+      const sessions = [
+        ...archivedSessions,
+        ...(disconnectedDevices.length ? [{ label: `Session #${sessionCounter}`, entries: disconnectedDevices }] : []),
+      ];
+      if (!sessions.length) return;
+
+      const dataHeader = 'name,address,connected,disconnected,duration';
+      const lines = [];
+      for (const s of sessions) {
+        lines.push(`# ${s.label}`);
+        lines.push(dataHeader);
+        for (const d of s.entries) {
+          const name = `"${String(d.name).replace(/"/g, '""')}"`;
+          lines.push(`${name},${d.id},${formatTime(d.connectedAt)},${formatTime(d.disconnectedAt)},${formatDuration(d.disconnectedAt - d.connectedAt)}`);
+        }
+      }
+      const csv = lines.join('\r\n');
+
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `kiwi_plotter_disconnect_${yyyymmdd_hhmmss(Date.now())}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
+
+  if (exportDisconnectXlsxBtn) {
+    exportDisconnectXlsxBtn.disabled = true;
+    exportDisconnectXlsxBtn.addEventListener('click', async () => {
+      const sessions = [
+        ...archivedSessions,
+        ...(disconnectedDevices.length ? [{ label: `Session #${sessionCounter}`, entries: disconnectedDevices }] : []),
+      ];
+      if (!sessions.length) return;
+
+      if (!window.XLSX) {
+        const s = document.createElement('script');
+        s.src = '/xlsx.full.min.js';
+        await new Promise((r, j) => { s.onload = r; s.onerror = j; document.head.appendChild(s); });
+      }
+
+      const wb = XLSX.utils.book_new();
+      for (const s of sessions) {
+        const rows = s.entries.map(d => ({
+          name: d.name,
+          address: d.id,
+          connected: formatTime(d.connectedAt),
+          disconnected: formatTime(d.disconnectedAt),
+          duration: formatDuration(d.disconnectedAt - d.connectedAt),
+        }));
+        const ws = XLSX.utils.json_to_sheet(rows);
+        XLSX.utils.book_append_sheet(wb, ws, s.label);
+      }
+      XLSX.writeFile(wb, `kiwi_plotter_disconnect_${yyyymmdd_hhmmss(Date.now())}.xlsx`);
     });
   }
 
@@ -534,4 +657,15 @@ function fetchDevicesOnce() {
   };
 
   window.addEventListener('pagehide', () => { swPort.postMessage('disconnect'); });
+
+  setInterval(() => {
+    if (!listEl) return;
+    const now = Date.now();
+    for (const row of listEl.querySelectorAll('tr[data-port]')) {
+      const port = row.dataset.port;
+      const connectedAt = connectionTimes.get(port);
+      const cell = row.querySelector('[data-stat="uptime"]');
+      if (cell && connectedAt != null) cell.textContent = formatDuration(now - connectedAt);
+    }
+  }, 1000);
 })();

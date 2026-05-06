@@ -54,9 +54,10 @@
                 <table class="deviceTable" id="deviceTable">
                   <thead>
                     <tr>
-                      <th>Name</th>
+                      <th data-sort="name">Name</th>
                       <th>Data Rate</th>
                       <th>Packet Rate</th>
+                      <th data-sort="uptime">Uptime</th>
                       <th>3D</th>
                     </tr>
                   </thead>
@@ -75,7 +76,11 @@
         <section class="card">
           <div class="row space" style="margin-bottom:10px">
             <span style="font-weight:600;font-size:15px">Disconnected Devices</span>
-            <button id="newSessionBtn" type="button">New Session</button>
+            <div class="row">
+              <button id="exportDisconnectBtn" type="button" disabled>Export CSV</button>
+              <button id="exportDisconnectXlsxBtn" type="button" disabled>Export Excel</button>
+              <button id="newSessionBtn" type="button">New Session</button>
+            </div>
           </div>
           <div id="disconnectedSessions"></div>
         </section>

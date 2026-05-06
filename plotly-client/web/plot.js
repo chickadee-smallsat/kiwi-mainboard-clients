@@ -8,6 +8,7 @@
     const bufMaxEl = document.getElementById('bufMax');
 
     const pauseBtn = document.getElementById('pauseBtn');
+    const resetTimeBtn = document.getElementById('resetTimeBtn');
     const windowInput = document.getElementById('windowSec');
     const rateInput = document.getElementById('rateHz');
     const streamSelect = document.getElementById('streamSelect');
@@ -70,6 +71,8 @@
         startedAt: null,
         rows: [],
     };
+
+    let receivedDeviceName = null;
 
     let uiStream = streamSelect ? streamSelect.value : 'all';
     let uiStreams = new Set();
@@ -1497,6 +1500,17 @@
         pauseBtn.textContent = paused ? 'Resume' : 'Pause';
     });
 
+    resetTimeBtn?.addEventListener('click', () => {
+        // Tell the worker to reset its t=0 reference.
+        worker.postMessage({ type: 'reset_time' });
+        // Clear all buffered data so the plots start fresh from t=0.
+        pending.length = 0;
+        for (const key of Object.keys(store)) {
+            for (const arr of Object.values(store[key])) arr.length = 0;
+        }
+        resyncPlots();
+    });
+
     recordBtn?.addEventListener('click', () => {
         recorder.isRecording = true;
         recorder.startedAt = Date.now();
@@ -1562,8 +1576,9 @@
         XLSX.utils.book_append_sheet(wb, wsBaro, 'BARO');
 
         const startedAt = recorder.startedAt ?? Date.now();
-        const base = board ? board.replace(/[^\w\-]+/g, '_') : 'kiwi';
-        const filename = `${base}_${deviceKey}_${yyyymmdd_hhmmss(startedAt)}.xlsx`;
+        const namePrefix = receivedDeviceName || 'kiwi';
+        const addrLabel = deviceKey.replace(/[^\w\-]+/g, '_');
+        const filename = `${namePrefix}_${addrLabel}_${yyyymmdd_hhmmss(startedAt)}.xlsx`;
 
         XLSX.writeFile(wb, filename);
     });
@@ -1625,6 +1640,15 @@
             reconnects += 1;
             if (reconnectsEl) reconnectsEl.textContent = String(reconnects);
             setConn('bad', 'disconnected (auto-retrying…)');
+        } else if (msg.type === 'devices') {
+            if (deviceId !== null && Array.isArray(msg.devices)) {
+                const entry = msg.devices.find(d => d.id === deviceId);
+                if (entry?.name) receivedDeviceName = entry.name;
+            }
+        } else if (msg.type === 'rename') {
+            if (deviceId !== null && msg.device === deviceId && msg.name) {
+                receivedDeviceName = msg.name;
+            }
         } else if (msg.type === 'data') {
             // deviceId is null for the "all" view, otherwise the exact device address string.
             if (deviceId !== null && msg.device !== deviceId) return;

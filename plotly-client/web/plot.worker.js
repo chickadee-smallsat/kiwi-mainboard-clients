@@ -178,6 +178,12 @@ function unpackSerde(raw) {
 
 self.onmessage = (ev) => {
     const raw = ev.data;
+
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && raw.type === 'reset_time') {
+        firstTs = null;
+        return;
+    }
+
     let parsed;
 
     // Accept either a pre-parsed array (from SharedWorker path) or a JSON string

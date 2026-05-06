@@ -77,7 +77,7 @@ function normalizeItem(raw) {
         };
     }
 
-    if (type === "temp" || type === "pressure" || type === "altitude") {
+    if (type === "temp" || type === "pressure" || type === "altitude" || type === "humidity" || type === "gas_resistance") {
         const value = safeNum(raw.value);
         if (value === null) return null;
 
@@ -140,6 +140,15 @@ function unpackDummy(raw) {
     if (pressure) out.push(pressure);
     if (altitude) out.push(altitude);
 
+    const humidityValue = raw.humidity ?? raw.Humidity;
+    const gasResistanceValue = raw.gas_resistance ?? raw.gasResistance ?? raw.GasResistance;
+
+    const humidity = scalarFromValue("humidity", humidityValue, ts);
+    const gasResistance = scalarFromValue("gas_resistance", gasResistanceValue, ts);
+
+    if (humidity) out.push(humidity);
+    if (gasResistance) out.push(gasResistance);
+
     return out.length ? out : null;
 }
 
@@ -154,7 +163,7 @@ function unpackSerde(raw) {
     const variant = keys[0];
     const values = raw.measurement[variant];
 
-    if (Array.isArray(values) && values.length === 3 && variant !== "Baro") {
+    if (Array.isArray(values) && values.length === 3 && variant !== "Baro" && variant !== "Humi") {
         return normalizeItem({
             sensor: variant.toLowerCase(),
             x: values[0],
@@ -169,6 +178,13 @@ function unpackSerde(raw) {
             normalizeItem({ sensor: "temp", value: values[0], ts }),
             normalizeItem({ sensor: "pressure", value: values[1], ts }),
             normalizeItem({ sensor: "altitude", value: values[2], ts }),
+        ].filter(Boolean);
+    }
+
+    if (variant === "Humi" && Array.isArray(values) && values.length === 3) {
+        return [
+            normalizeItem({ sensor: "humidity", value: values[1], ts }),
+            normalizeItem({ sensor: "gas_resistance", value: values[2], ts }),
         ].filter(Boolean);
     }
 

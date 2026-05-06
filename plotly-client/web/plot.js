@@ -36,6 +36,8 @@
     const tempDiv = document.getElementById('tempPlot');
     const pressureDiv = document.getElementById('pressurePlot');
     const altitudeDiv = document.getElementById('altitudePlot');
+    const humidityDiv = document.getElementById('humidityPlot');
+    const gasResistanceDiv = document.getElementById('gasResistancePlot');
 
     const streamChecksEl = document.getElementById('streamChecks');
     const selectAllBtn = document.getElementById('selectAllBtn');
@@ -101,6 +103,8 @@
         temp: { ts: [], v: [] },
         pressure: { ts: [], v: [] },
         altitude: { ts: [], v: [] },
+        humidity: { ts: [], v: [] },
+        gas_resistance: { ts: [], v: [] },
     };
 
     const store = {
@@ -110,6 +114,8 @@
         temp: { ts: [], v: [] },
         pressure: { ts: [], v: [] },
         altitude: { ts: [], v: [] },
+        humidity: { ts: [], v: [] },
+        gas_resistance: { ts: [], v: [] },
     };
 
     const dialStats = document.getElementById('dialStats');
@@ -326,7 +332,7 @@
 
     function applyThemeToPlots(theme) {
         const t = THEMES[theme] || THEMES.dark;
-        const divs = [accelDiv, gyroDiv, magDiv, tempDiv, pressureDiv, altitudeDiv];
+        const divs = [accelDiv, gyroDiv, magDiv, tempDiv, pressureDiv, altitudeDiv, humidityDiv, gasResistanceDiv];
 
         for (const div of divs) {
             if (!div) continue;
@@ -372,6 +378,8 @@
         applyScalar(tempDiv, colors[0]);
         applyScalar(pressureDiv, colors[1]);
         applyScalar(altitudeDiv, colors[2]);
+        applyScalar(humidityDiv, colors[3]);
+        applyScalar(gasResistanceDiv, colors[4]);
     }
 
     function initThemeAndPalette() {
@@ -482,7 +490,7 @@
     }
 
     function resizeAllPlots() {
-        [accelDiv, gyroDiv, magDiv, tempDiv, pressureDiv, altitudeDiv].forEach(div => {
+        [accelDiv, gyroDiv, magDiv, tempDiv, pressureDiv, altitudeDiv, humidityDiv, gasResistanceDiv].forEach(div => {
             resizePlot(div);
         });
     }
@@ -961,6 +969,8 @@
     if (tempDiv) initScalarPlot(tempDiv, '°C');
     if (pressureDiv) initScalarPlot(pressureDiv, 'hPa');
     if (altitudeDiv) initScalarPlot(altitudeDiv, 'm');
+    if (humidityDiv) initScalarPlot(humidityDiv, '%');
+    if (gasResistanceDiv) initScalarPlot(gasResistanceDiv, 'Ω');
 
     // Y-axis range dialog setup
     const yRangeDialog = document.getElementById('yRangeDialog');
@@ -1138,6 +1148,18 @@
 
             draw.altitude.ts.push(item.ts_s);
             draw.altitude.v.push(item.value);
+        } else if (item.sensor === 'humidity' && shouldDraw('humidity') && plotVisible(humidityDiv)) {
+            store.humidity.ts.push(item.ts_s);
+            store.humidity.v.push(item.value);
+
+            draw.humidity.ts.push(item.ts_s);
+            draw.humidity.v.push(item.value);
+        } else if (item.sensor === 'gas_resistance' && shouldDraw('gas_resistance') && plotVisible(gasResistanceDiv)) {
+            store.gas_resistance.ts.push(item.ts_s);
+            store.gas_resistance.v.push(item.value);
+
+            draw.gas_resistance.ts.push(item.ts_s);
+            draw.gas_resistance.v.push(item.value);
         }
     }
 
@@ -1205,6 +1227,16 @@
     function clearAltitudeDraw() {
         draw.altitude.ts.length = 0;
         draw.altitude.v.length = 0;
+    }
+
+    function clearHumidityDraw() {
+        draw.humidity.ts.length = 0;
+        draw.humidity.v.length = 0;
+    }
+
+    function clearGasResistanceDraw() {
+        draw.gas_resistance.ts.length = 0;
+        draw.gas_resistance.v.length = 0;
     }
 
     function trimVectorStore(storeObj) {
@@ -1388,6 +1420,24 @@
 
             clearAltitudeDraw();
         }
+
+        if (humidityDiv && draw.humidity.ts.length) {
+            const latest = draw.humidity.ts[draw.humidity.ts.length - 1];
+
+            Plotly.extendTraces(humidityDiv, { x: [draw.humidity.ts], y: [draw.humidity.v] }, [0]);
+            Plotly.relayout(humidityDiv, { 'xaxis.range': [latest - windowSec, latest] });
+
+            clearHumidityDraw();
+        }
+
+        if (gasResistanceDiv && draw.gas_resistance.ts.length) {
+            const latest = draw.gas_resistance.ts[draw.gas_resistance.ts.length - 1];
+
+            Plotly.extendTraces(gasResistanceDiv, { x: [draw.gas_resistance.ts], y: [draw.gas_resistance.v] }, [0]);
+            Plotly.relayout(gasResistanceDiv, { 'xaxis.range': [latest - windowSec, latest] });
+
+            clearGasResistanceDraw();
+        }
     }
 
     function resyncPlots() {
@@ -1397,6 +1447,8 @@
         trimScalarStore(store.temp);
         trimScalarStore(store.pressure);
         trimScalarStore(store.altitude);
+        trimScalarStore(store.humidity);
+        trimScalarStore(store.gas_resistance);
 
         resyncVector(accelDiv, selectVectorWindow(store.accel));
         resyncVector(gyroDiv, selectVectorWindow(store.gyro));
@@ -1404,6 +1456,8 @@
         resyncScalar(tempDiv, selectScalarWindow(store.temp));
         resyncScalar(pressureDiv, selectScalarWindow(store.pressure));
         resyncScalar(altitudeDiv, selectScalarWindow(store.altitude));
+        resyncScalar(humidityDiv, selectScalarWindow(store.humidity));
+        resyncScalar(gasResistanceDiv, selectScalarWindow(store.gas_resistance));
 
         schedulePlotResize();
     }
@@ -1421,7 +1475,7 @@
     // Add a Y-range button to each plot panel — must run after initPanelLayout()
     // creates .panelControls, otherwise closest('.dashboardPanel') exists but
     // panel.querySelector('.panelControls') returns null.
-    for (const div of [accelDiv, gyroDiv, magDiv, tempDiv, pressureDiv, altitudeDiv]) {
+    for (const div of [accelDiv, gyroDiv, magDiv, tempDiv, pressureDiv, altitudeDiv, humidityDiv, gasResistanceDiv]) {
         if (!div) continue;
         const panel = div.closest('.dashboardPanel');
         if (!panel) continue;
@@ -1574,6 +1628,26 @@
         const wsBaro = XLSX.utils.json_to_sheet(baroShaped);
 
         XLSX.utils.book_append_sheet(wb, wsBaro, 'BARO');
+
+        const humiRows = recorder.rows.filter(r => r.sensor === 'humidity' || r.sensor === 'gas_resistance');
+        const humiMap = new Map();
+
+        for (const r of humiRows) {
+            let row = humiMap.get(r.ts_ms);
+
+            if (!row) {
+                row = { ts_ms: r.ts_ms, humidity: null, gas_resistance: null };
+                humiMap.set(r.ts_ms, row);
+            }
+
+            if (r.sensor === 'humidity') row.humidity = r.value;
+            else if (r.sensor === 'gas_resistance') row.gas_resistance = r.value;
+        }
+
+        const humiShaped = Array.from(humiMap.values()).sort((a, b) => a.ts_ms - b.ts_ms);
+        const wsHumi = XLSX.utils.json_to_sheet(humiShaped);
+
+        XLSX.utils.book_append_sheet(wb, wsHumi, 'HUMI');
 
         const startedAt = recorder.startedAt ?? Date.now();
         const namePrefix = receivedDeviceName || 'kiwi';

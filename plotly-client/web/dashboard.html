@@ -59,6 +59,8 @@
                     <label class="check"><input type="checkbox" value="temp" checked /> Temperature</label>
                     <label class="check"><input type="checkbox" value="pressure" checked /> Pressure</label>
                     <label class="check"><input type="checkbox" value="altitude" checked /> Altitude</label>
+                    <label class="check"><input type="checkbox" value="humidity" checked /> Humidity</label>
+                    <label class="check"><input type="checkbox" value="gas_resistance" checked /> Gas Resistance</label>
                   </div>
 
                   <select id="streamSelect" multiple style="display:none">
@@ -68,6 +70,8 @@
                     <option value="temp" selected>temp</option>
                     <option value="pressure" selected>pressure</option>
                     <option value="altitude" selected>altitude</option>
+                    <option value="humidity" selected>humidity</option>
+                    <option value="gas_resistance" selected>gas_resistance</option>
                   </select>
                 </div>
               </details>
@@ -152,6 +156,20 @@
           <details class="plotDetails" open data-stream="altitude">
             <summary>Altitude</summary>
             <div class="plotWrap"><div id="altitudePlot"></div></div>
+          </details>
+        </div>
+
+        <div class="dashboardPanel" id="panel-humidity" data-default-cols="4" data-min-cols="3" data-max-cols="8" data-default-height="300">
+          <details class="plotDetails" open data-stream="humidity">
+            <summary>Humidity</summary>
+            <div class="plotWrap"><div id="humidityPlot"></div></div>
+          </details>
+        </div>
+
+        <div class="dashboardPanel" id="panel-gas_resistance" data-default-cols="4" data-min-cols="3" data-max-cols="8" data-default-height="300">
+          <details class="plotDetails" open data-stream="gas_resistance">
+            <summary>Gas Resistance</summary>
+            <div class="plotWrap"><div id="gasResistancePlot"></div></div>
           </details>
         </div>
 

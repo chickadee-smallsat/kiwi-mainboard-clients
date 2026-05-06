@@ -621,6 +621,7 @@ body.light .miniDetails{
 
 .deviceTable{
   width:100%;
+  table-layout:fixed;
   border-collapse:collapse;
   font-size:13px;
 }
@@ -679,6 +680,8 @@ body.light .deviceTable tbody tr:hover td{
 .deviceTable td.devName{
   font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
   color:var(--accent);
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 
 .mono{
@@ -688,7 +691,7 @@ body.light .deviceTable tbody tr:hover td{
 .deviceTable td.devStat{
   font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
   color:var(--muted);
-  min-width:90px;
+  font-variant-numeric:tabular-nums;
 }
 
 .deviceTable td.devActions{

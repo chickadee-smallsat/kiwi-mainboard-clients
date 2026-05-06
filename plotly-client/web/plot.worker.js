@@ -5,10 +5,9 @@ function normalizeTimestampToSec(t) {
     const raw = Number.isFinite(n) ? n : Date.now() / 1000;
     let sec;
 
-    if (raw > 1000000000000) sec = raw / 1000;
-    else if (raw > 1000000000) sec = raw;
-    else if (raw > 1000000) sec = raw / 1000000;
-    else sec = raw;
+    if (raw > 1000000000000) sec = raw / 1000;   // Unix epoch ms → s
+    else if (raw > 1000000) sec = raw / 1000000; // device μs → s
+    else sec = raw;                               // device s (sub-second uptime)
 
     if (firstTs === null) firstTs = sec;
 

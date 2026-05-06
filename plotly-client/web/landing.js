@@ -28,13 +28,15 @@
   const deviceStats = new Map();
   // Tracks when each device was first seen (ms since epoch).
   const connectionTimes = new Map();
+  // Latest device-reported uptime per device: { ts_us: number, lastUpdatedMs: number }
+  const deviceUptimeSec = new Map();
   // Log of disconnected devices in the current session: { id, name, connectedAt, disconnectedAt }
   const disconnectedDevices = [];
   // Archived sessions: each entry is { label: string, entries: [...] }
   const archivedSessions = [];
   let sessionCounter = 1;
   let reconnects = 0;
-  // Sorting state for the device table. sortKey: null | 'name' | 'uptime'
+  // Sorting state for the device table. sortKey: null | 'name' | 'linktime' | 'uptime'
   let sortKey = null;
   let sortDir = 'asc';
 
@@ -93,21 +95,31 @@
     if (q) {
       all = all.filter((p) => String(p).includes(q) || (deviceNames.get(p) || '').toLowerCase().includes(q.toLowerCase()));
     }
+    const namedFirst = (a, b, dir = 'asc') => {
+      const na = deviceNames.get(a);
+      const nb = deviceNames.get(b);
+      if (na && !nb) return -1;
+      if (!na && nb) return 1;
+      if (na && nb) return dir === 'asc' ? na.toLowerCase().localeCompare(nb.toLowerCase()) : nb.toLowerCase().localeCompare(na.toLowerCase());
+      return Number(a) - Number(b);
+    };
     if (sortKey === 'name') {
-      all.sort((a, b) => {
-        const na = (deviceNames.get(a) || a).toLowerCase();
-        const nb = (deviceNames.get(b) || b).toLowerCase();
-        return sortDir === 'asc' ? na.localeCompare(nb) : nb.localeCompare(na);
-      });
-    } else if (sortKey === 'uptime') {
+      all.sort((a, b) => namedFirst(a, b, sortDir));
+    } else if (sortKey === 'linktime') {
       all.sort((a, b) => {
         const ta = connectionTimes.get(a) ?? Date.now();
         const tb = connectionTimes.get(b) ?? Date.now();
-        // asc = shortest uptime first = largest connectedAt first
+        // asc = shortest linktime first = largest connectedAt first
         return sortDir === 'asc' ? tb - ta : ta - tb;
       });
+    } else if (sortKey === 'uptime') {
+      all.sort((a, b) => {
+        const ua = deviceUptimeSec.get(a)?.ts_us ?? -1;
+        const ub = deviceUptimeSec.get(b)?.ts_us ?? -1;
+        return sortDir === 'asc' ? ua - ub : ub - ua;
+      });
     } else {
-      all.sort((a, b) => Number(a) - Number(b));
+      all.sort((a, b) => namedFirst(a, b, 'asc'));
     }
     return all;
   }
@@ -268,6 +280,12 @@
       tdPkt.textContent = '—';
       tr.appendChild(tdPkt);
 
+      const tdLinktime = document.createElement('td');
+      tdLinktime.className = 'devStat';
+      tdLinktime.dataset.stat = 'linktime';
+      tdLinktime.textContent = '—';
+      tr.appendChild(tdLinktime);
+
       const tdUptime = document.createElement('td');
       tdUptime.className = 'devStat';
       tdUptime.dataset.stat = 'uptime';
@@ -292,10 +310,14 @@
       listEl.appendChild(tr);
     }
 
-    // Reorder existing rows to match the (sorted) ports array.
+    // Reorder existing rows to match the (sorted) ports array, and refresh name cells.
     for (const port of ports) {
       const row = listEl.querySelector(`tr[data-port="${CSS.escape(port)}"]`);
-      if (row) listEl.appendChild(row);
+      if (row) {
+        const cell = row.querySelector('.devName');
+        if (cell) cell.textContent = deviceNames.get(port) || port;
+        listEl.appendChild(row);
+      }
     }
   }
 
@@ -306,38 +328,22 @@
     // Estimate bytes as the JSON representation length (good enough for display).
     const bytes = JSON.stringify(payloadArray).length;
     const packets = payloadArray.length;
-    const now = performance.now();
 
     let s = deviceStats.get(device);
     if (!s) {
-      s = { bytes: 0, packets: 0, lastWindowMs: now, dataRate: '—', packetRate: '—' };
+      s = { bytes: 0, packets: 0, lastWindowMs: performance.now(), dataRate: '—', packetRate: '—' };
       deviceStats.set(device, s);
     }
 
     s.bytes += bytes;
     s.packets += packets;
 
-    const elapsed = now - s.lastWindowMs;
-    if (elapsed >= STAT_WINDOW_MS) {
-      const sec = elapsed / 1000;
-      const bps = s.bytes / sec;
-      const pps = s.packets / sec;
-
-      s.dataRate = bps >= 1024 ? `${(bps / 1024).toFixed(1)} KB/s` : `${bps.toFixed(0)} B/s`;
-      s.packetRate = `${pps.toFixed(1)} pkt/s`;
-
-      s.bytes = 0;
-      s.packets = 0;
-      s.lastWindowMs = now;
-
-      // Update the relevant table cells directly without re-rendering the whole table.
-      const row = listEl?.querySelector(`tr[data-port="${CSS.escape(device)}"]`);
-      if (row) {
-        const dataCell = row.querySelector('[data-stat="data"]');
-        const pktCell = row.querySelector('[data-stat="pkt"]');
-        if (dataCell) dataCell.textContent = s.dataRate;
-        if (pktCell) pktCell.textContent = s.packetRate;
-      }
+    // Track the newest device timestamp from this batch.
+    let u = deviceUptimeSec.get(device);
+    if (!u) { u = { ts_us: 0 }; deviceUptimeSec.set(device, u); }
+    for (const item of payloadArray) {
+      const ts = Number(item.timestamp ?? item.ts);
+      if (Number.isFinite(ts) && ts > 0 && ts > u.ts_us) u.ts_us = ts;
     }
   }
 
@@ -368,12 +374,8 @@
 
   function applyRename(deviceId, name) {
     deviceNames.set(deviceId, name);
-    // Update the Name cell in an existing table row without full re-render.
-    const row = listEl?.querySelector(`tr[data-port="${CSS.escape(deviceId)}"]`);
-    if (row) {
-      const cell = row.querySelector('.devName');
-      if (cell) cell.textContent = name;
-    }
+    // Re-render the list so the device moves to its correct sorted position.
+    render();
     // Update open tab labels that belong to this device.
     for (const [key, entry] of tabs.entries()) {
       if (key === deviceId || key === `${deviceId}-3d`) {
@@ -406,13 +408,17 @@
 
   function recordDisconnection(id, now) {
     const connectedAt = connectionTimes.get(id) ?? now;
+    const uptimeEntry = deviceUptimeSec.get(id);
+    const uptimeMs = uptimeEntry ? Math.round(uptimeEntry.ts_us / 1000) : null;
     disconnectedDevices.unshift({
       id,
       name: deviceNames.get(id) || id,
       connectedAt,
       disconnectedAt: now,
+      uptimeMs,
     });
     connectionTimes.delete(id);
+    deviceUptimeSec.delete(id);
     renderDisconnected();
   }
 
@@ -427,7 +433,7 @@
       wrap.className = 'deviceTableWrap';
       const table = document.createElement('table');
       table.className = 'deviceTable';
-      table.innerHTML = '<thead><tr><th>Name</th><th>Address</th><th>Connected</th><th>Disconnected</th><th>Duration</th></tr></thead>';
+      table.innerHTML = '<thead><tr><th>Name</th><th>Address</th><th>Connected</th><th>Disconnected</th><th>Linktime</th><th>Uptime</th></tr></thead>';
       const tbody = document.createElement('tbody');
       for (const d of entries) {
         const tr = document.createElement('tr');
@@ -436,6 +442,7 @@
         tr.appendChild(mkTd(formatTime(d.connectedAt)));
         tr.appendChild(mkTd(formatTime(d.disconnectedAt)));
         tr.appendChild(mkTd(formatDuration(d.disconnectedAt - d.connectedAt)));
+        tr.appendChild(mkTd(d.uptimeMs != null ? formatDuration(d.uptimeMs) : '—'));
         tbody.appendChild(tr);
       }
       table.appendChild(tbody);
@@ -579,14 +586,15 @@ function fetchDevicesOnce() {
       ];
       if (!sessions.length) return;
 
-      const dataHeader = 'name,address,connected,disconnected,duration';
+      const dataHeader = 'name,address,connected,disconnected,linktime,uptime';
       const lines = [];
       for (const s of sessions) {
         lines.push(`# ${s.label}`);
         lines.push(dataHeader);
         for (const d of s.entries) {
           const name = `"${String(d.name).replace(/"/g, '""')}"`;
-          lines.push(`${name},${d.id},${formatTime(d.connectedAt)},${formatTime(d.disconnectedAt)},${formatDuration(d.disconnectedAt - d.connectedAt)}`);
+          const uptime = d.uptimeMs != null ? formatDuration(d.uptimeMs) : '';
+          lines.push(`${name},${d.id},${formatTime(d.connectedAt)},${formatTime(d.disconnectedAt)},${formatDuration(d.disconnectedAt - d.connectedAt)},${uptime}`);
         }
       }
       const csv = lines.join('\r\n');
@@ -623,7 +631,8 @@ function fetchDevicesOnce() {
           address: d.id,
           connected: formatTime(d.connectedAt),
           disconnected: formatTime(d.disconnectedAt),
-          duration: formatDuration(d.disconnectedAt - d.connectedAt),
+          linktime: formatDuration(d.disconnectedAt - d.connectedAt),
+          uptime: d.uptimeMs != null ? formatDuration(d.uptimeMs) : '',
         }));
         const ws = XLSX.utils.json_to_sheet(rows);
         XLSX.utils.book_append_sheet(wb, ws, s.label);
@@ -660,12 +669,40 @@ function fetchDevicesOnce() {
 
   setInterval(() => {
     if (!listEl) return;
-    const now = Date.now();
+    const wallNow = Date.now();
+    const perfNow = performance.now();
     for (const row of listEl.querySelectorAll('tr[data-port]')) {
       const port = row.dataset.port;
+
+      // Linktime.
       const connectedAt = connectionTimes.get(port);
-      const cell = row.querySelector('[data-stat="uptime"]');
-      if (cell && connectedAt != null) cell.textContent = formatDuration(now - connectedAt);
+      const linktimeCell = row.querySelector('[data-stat="linktime"]');
+      if (linktimeCell && connectedAt != null) linktimeCell.textContent = formatDuration(wallNow - connectedAt);
+
+      // Uptime.
+      const u = deviceUptimeSec.get(port);
+      const uptimeCell = row.querySelector('[data-stat="uptime"]');
+      if (uptimeCell && u && u.ts_us > 0) uptimeCell.textContent = formatDuration(Math.round(u.ts_us / 1000));
+
+      // Data rate & packet rate.
+      const s = deviceStats.get(port);
+      if (s) {
+        const elapsed = perfNow - s.lastWindowMs;
+        if (elapsed >= STAT_WINDOW_MS) {
+          const sec = elapsed / 1000;
+          const bps = s.bytes / sec;
+          const pps = s.packets / sec;
+          s.dataRate = bps >= 1024 ? `${(bps / 1024).toFixed(1)} KB/s` : `${bps.toFixed(0)} B/s`;
+          s.packetRate = `${pps.toFixed(1)} pkt/s`;
+          s.bytes = 0;
+          s.packets = 0;
+          s.lastWindowMs = perfNow;
+        }
+        const dataCell = row.querySelector('[data-stat="data"]');
+        const pktCell = row.querySelector('[data-stat="pkt"]');
+        if (dataCell) dataCell.textContent = s.dataRate;
+        if (pktCell) pktCell.textContent = s.packetRate;
+      }
     }
   }, 1000);
 })();

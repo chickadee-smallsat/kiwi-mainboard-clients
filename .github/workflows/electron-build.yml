@@ -48,6 +48,15 @@ jobs:
           cache: npm
           cache-dependency-path: plotly-app/package-lock.json
 
+      - name: Cache Electron binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            %LOCALAPPDATA%\electron\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('plotly-app/package-lock.json') }}
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 

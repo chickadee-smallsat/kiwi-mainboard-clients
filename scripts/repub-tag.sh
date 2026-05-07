@@ -5,36 +5,29 @@
 #   1. Deletes the tag from local and remote.
 #
 # It then recreates the tag locally and pushes it to the remote, which triggers
-# the CI build workflow for a clean re-publish.
+# the CI build workflow for a clean re-publish. Solid release tags (vX.Y.Z) are
+# always GPG-signed; pre-release tags (vX.Y.Z-*) are created unsigned.
 #
 # Usage:
-#   ./scripts/repub-tag.sh [--sign] [-u <keyid>] <tag>
+#   ./scripts/repub-tag.sh [-u <keyid>] <tag>
 #
 # Options:
-#   --sign, -s      GPG-sign the new tag
-#   -u <keyid>      Use the specified GPG key (implies --sign)
+#   -u <keyid>      Use the specified GPG key for signing (solid releases only)
 #
 # Environment:
 #   REMOTE     Git remote name (default: origin)
-#   SIGN_TAG   Set to 1 to sign the tag (alternative to --sign)
 #   SIGN_KEY   GPG key ID or fingerprint to use for signing
 
 set -euo pipefail
 
 # ── arguments ────────────────────────────────────────────────────────────────
 
-SIGN_TAG="${SIGN_TAG:-0}"
 SIGN_KEY="${SIGN_KEY:-}"
 TAG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --sign|-s)
-      SIGN_TAG=1
-      shift
-      ;;
     -u)
-      SIGN_TAG=1
       SIGN_KEY="${2:-}"
       if [[ -z "$SIGN_KEY" ]]; then
         echo "Error: -u requires a key ID argument" >&2
@@ -44,7 +37,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -*)
       echo "Unknown option: $1" >&2
-      echo "Usage: $0 [--sign] [-u <keyid>] <tag>" >&2
+      echo "Usage: $0 [-u <keyid>] <tag>" >&2
       exit 1
       ;;
     *)
@@ -55,7 +48,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$TAG" ]]; then
-  echo "Usage: $0 [--sign] [-u <keyid>] <tag>" >&2
+  echo "Usage: $0 [-u <keyid>] <tag>" >&2
   exit 1
 fi
 
@@ -66,12 +59,6 @@ REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 # ── pre-flight checks ────────────────────────────────────────────────────────
-
-# Solid release tags (vX.Y.Z with no suffix) must be signed.
-if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [[ "$SIGN_TAG" != "1" ]]; then
-  echo "Error: solid release tag '$TAG' must be signed. Use --sign or -u <keyid>." >&2
-  exit 1
-fi
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Error: there are uncommitted changes. Commit or stash them before re-publishing." >&2
@@ -92,7 +79,33 @@ fi
 
 # ── 2. Create the new local tag (before touching the remote) ─────────────────
 
-if [[ "$SIGN_TAG" == "1" ]]; then
+# Solid release tags (vX.Y.Z) are signed; pre-release tags are not.
+if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  # Verify GPG is available and the signing key is accessible before touching anything.
+  if ! command -v gpg &>/dev/null; then
+    echo "Error: gpg is not installed or not on PATH." >&2
+    exit 1
+  fi
+  if [[ -n "$SIGN_KEY" ]]; then
+    if ! gpg --list-secret-keys "$SIGN_KEY" &>/dev/null; then
+      echo "Error: GPG secret key '$SIGN_KEY' not found." >&2
+      exit 1
+    fi
+  else
+    CONFIGURED_KEY="$(git config --get user.signingkey 2>/dev/null || true)"
+    if [[ -n "$CONFIGURED_KEY" ]]; then
+      if ! gpg --list-secret-keys "$CONFIGURED_KEY" &>/dev/null; then
+        echo "Error: GPG secret key '$CONFIGURED_KEY' (from git config user.signingkey) not found." >&2
+        exit 1
+      fi
+    else
+      if ! gpg --list-secret-keys &>/dev/null || [[ -z "$(gpg --list-secret-keys 2>/dev/null)" ]]; then
+        echo "Error: No GPG secret keys found. Set up GPG or specify a key with -u <keyid>." >&2
+        exit 1
+      fi
+    fi
+  fi
+
   if [[ -n "$SIGN_KEY" ]]; then
     echo "==> Creating signed local tag '$TAG' (key: $SIGN_KEY)"
     git tag -s -u "$SIGN_KEY" "$TAG"
